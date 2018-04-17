@@ -643,12 +643,13 @@ void ConfigureEngine(asIScriptEngine *engine, const nlohmann::json &config)
 	RegisterScriptPreregGlobalProperties(engine, config);
 }
 
-std::string DumpBytecode(asIScriptFunction *function)
+std::string dumpBytecode(asIScriptFunction *func)
 {
 	std::string dump;
+	asCScriptFunction *function = static_cast<asCScriptFunction *>(func);
 
 	asCScriptEngine *engine = static_cast<asCScriptEngine *>(function->GetEngine());
-
+	
 	asUINT length;
 	asDWORD *code = function->GetByteCode(&length);
 	for (uint32_t position = 0; position < length; )
@@ -663,7 +664,7 @@ std::string DumpBytecode(asIScriptFunction *function)
 		{
 		case asBCTYPE_NO_ARG: // no args
 			{
-				disas = fmtString("%s", mnem);
+				disas = fmtString("%-8s", mnem);
 			}
 			break;
 		case asBCTYPE_W_ARG: // word imm
@@ -674,11 +675,11 @@ std::string DumpBytecode(asIScriptFunction *function)
 				case asBC_STR:
 					{
 						const auto &str = engine->GetConstantString(arg0);
-						disas = fmtString("%s %d (%d:\"%s\")", mnem, arg0, str.GetLength(), str.AddressOf());
+						disas = fmtString("%-8s %d (%d:\"%s\")", mnem, arg0, str.GetLength(), str.AddressOf());
 					}
 					break;
 				default:
-					disas = fmtString("%s %d", mnem, arg0);
+					disas = fmtString("%-8s %d", mnem, arg0);
 					break;
 				}
 			}
@@ -687,7 +688,8 @@ std::string DumpBytecode(asIScriptFunction *function)
 		case asBCTYPE_rW_ARG: // word var src
 			{
 				uint16_t arg0 = asBC_WORDARG0(inst);
-				disas = fmtString("%s v%d", mnem, arg0);
+				disas = fmtString("%-8s v%d", mnem,
+								  reinterpret_cast<int16_t &>(arg0));
 			}
 			break;
 		case asBCTYPE_wW_rW_ARG: // word dst, word src
@@ -695,14 +697,18 @@ std::string DumpBytecode(asIScriptFunction *function)
 			{
 				uint16_t arg0 = asBC_WORDARG0(inst);
 				uint16_t arg1 = asBC_WORDARG1(inst);
-				disas = fmtString("%s v%d, v%d", mnem, arg0, arg1);
+				disas = fmtString("%-8s v%d, v%d", mnem,
+								  reinterpret_cast<int16_t &>(arg0),
+								  reinterpret_cast<int16_t &>(arg1));
 			}
 			break;
 		case asBCTYPE_wW_W_ARG: // word dst, word imm
 			{
 				uint16_t arg0 = asBC_WORDARG0(inst);
 				uint16_t arg1 = asBC_WORDARG1(inst);
-				disas = fmtString("%s v%d, %d", mnem, arg0, arg1);
+				disas = fmtString("%-8s v%d, %d", mnem,
+								  reinterpret_cast<int16_t &>(arg0),
+								  reinterpret_cast<int16_t &>(arg1));
 			}
 			break;
 		case asBCTYPE_wW_rW_DW_ARG: // word dst, word src, dword imm
@@ -716,10 +722,16 @@ std::string DumpBytecode(asIScriptFunction *function)
 				case asBC_ADDIf:
 				case asBC_SUBIf:
 				case asBC_MULIf:
-					disas = fmtString("%s v%d, v%d, %f", mnem, arg0, arg1, reinterpret_cast<float &>(arg2));
+					disas = fmtString("%-8s v%d, v%d, %f", mnem,
+									  reinterpret_cast<int16_t &>(arg0),
+									  reinterpret_cast<int16_t &>(arg1),
+									  reinterpret_cast<float &>(arg2));
 					break;
 				default:
-					disas = fmtString("%s v%d, v%d, %d", mnem, arg0, arg1, arg2);
+					disas = fmtString("%-8s v%d, v%d, %d", mnem,
+									  reinterpret_cast<int16_t &>(arg0),
+									  reinterpret_cast<int16_t &>(arg1),
+									  reinterpret_cast<int16_t &>(arg2));
 					break;
 				}
 			}
@@ -732,23 +744,35 @@ std::string DumpBytecode(asIScriptFunction *function)
 				case asBC_OBJTYPE:
 					{
 						asIObjectType *type = reinterpret_cast<asIObjectType *>(arg0);
-						disas = fmtString("%s 0x%x (type:%s)", mnem, arg0, type->GetName());
+						disas = fmtString("%-8s 0x%x (type:%s)", mnem, arg0, type->GetName());
 					}
 					break;
 				case asBC_FuncPtr:
 					{
 						asIScriptFunction *func = reinterpret_cast<asIScriptFunction *>(arg0);
-						disas = fmtString("%s 0x%x (func:%s)", mnem, arg0, func->GetDeclaration());
+						disas = fmtString("%-8s 0x%x (func:%s)", mnem, arg0, func->GetDeclaration());
 					}
 					break;
 				case asBC_PshC4:
 				case asBC_Cast:
-					disas = fmtString("%s 0x%x (i:%d, f:%g)", mnem,
+					disas = fmtString("%-8s 0x%x (i:%d, f:%g)", mnem,
 									  arg0, reinterpret_cast<int &>(arg0), reinterpret_cast<float &>(arg0));
 					break;
 				case asBC_TYPEID:
-					disas = fmtString("%s 0x%x (decl:%s)", mnem,
+					disas = fmtString("%-8s 0x%x (decl:%s)", mnem,
 									  arg0, engine->GetTypeDeclaration(reinterpret_cast<int &>(arg0)));
+					break;
+				case asBC_PGA: // global vars
+				case asBC_PshGPtr:
+				case asBC_LDG:
+				case asBC_PshG4:
+					{
+						asCGlobalProperty *prop = function->GetPropertyByGlobalVarPtr(reinterpret_cast<void *>(arg0));
+						disas = fmtString("%-8s 0x%x (%d:%s)", mnem,
+										  arg0,
+										  prop->id,
+										  prop->name.AddressOf());
+					}
 					break;
 				case asBC_CALL:
 				case asBC_CALLSYS:
@@ -756,12 +780,23 @@ std::string DumpBytecode(asIScriptFunction *function)
 				case asBC_CALLINTF:
 				case asBC_Thiscall1:
 					{
-						disas = fmtString("%s %d (%s)", mnem,
-										  reinterpret_cast<int &>(arg0), engine->GetFunctionDeclaration(reinterpret_cast<int &>(arg0)).AddressOf());
+						asIScriptFunction *func;
+						if (arg0 & 0x40000000)
+						{
+							func = engine->importedFunctions[reinterpret_cast<int &>(arg0) & ~0x40000000]->importedFunctionSignature;
+						}
+						else
+						{
+							func = engine->GetFunctionById(reinterpret_cast<int &>(arg0));
+						}
+
+						disas = fmtString("%-8s %d (%s)", mnem,
+										  arg0,
+										  func->GetDeclaration(true, true, true));
 					}
 					break;
 				case asBC_REFCPY:
-					disas = fmtString("%s 0x%x", mnem, arg0);
+					disas = fmtString("%-8s 0x%x", mnem, arg0);
 					break;
 				case asBC_JMP:
 				case asBC_JZ:
@@ -772,12 +807,12 @@ std::string DumpBytecode(asIScriptFunction *function)
 				case asBC_JLowNZ:
 				case asBC_JNS:
 				case asBC_JNP:
-					disas = fmtString("%s %+d (d:%x)", mnem,
+					disas = fmtString("%-8s %+d (d:%x)", mnem,
 									  reinterpret_cast<int &>(arg0),
 									  position + reinterpret_cast<int &>(arg0));
 					break;
 				default:
-					disas = fmtString("%s %d", mnem, reinterpret_cast<int &>(arg0));
+					disas = fmtString("%-8s %d", mnem, reinterpret_cast<int &>(arg0));
 					break;
 				}
 			}
@@ -786,7 +821,7 @@ std::string DumpBytecode(asIScriptFunction *function)
 			{
 				uint64_t arg0 = asBC_QWORDARG(inst);
 				// #todo-csasm: Potentially add 64-bit pointer opcode handling
-				disas = fmtString("%s 0x%llx (i:%lld, f:%g)", mnem,
+				disas = fmtString("%-8s 0x%llx (i:%lld, f:%g)", mnem,
 								  arg0, reinterpret_cast<int64_t &>(arg0), reinterpret_cast<double &>(arg0));
 			}
 			break;
@@ -801,13 +836,18 @@ std::string DumpBytecode(asIScriptFunction *function)
 				case asBC_FREE:
 					{
 						asIObjectType *type = reinterpret_cast<asIObjectType *>(arg1);
-						disas = fmtString("%s v%d, 0x%x (type:%s)", mnem,
-										  arg0, static_cast<uint32_t>(arg1), type->GetName());
+						disas = fmtString("%-8s v%d, 0x%x (type:%s)", mnem,
+										  reinterpret_cast<int16_t &>(arg0),
+										  static_cast<uint32_t>(arg1),
+										  type->GetName());
 					}
 					break;
 				default:
-					disas = fmtString("%s v%d, 0x%llx (i:%lld, f:%g)", mnem,
-									  arg0, arg1, reinterpret_cast<int64_t &>(arg1), reinterpret_cast<double &>(arg1));
+					disas = fmtString("%-8s v%d, 0x%llx (i:%lld, f:%g)", mnem,
+									  reinterpret_cast<int16_t &>(arg0),
+									  arg1,
+									  reinterpret_cast<int64_t &>(arg1),
+									  reinterpret_cast<double &>(arg1));
 					break;
 				}
 			}
@@ -824,13 +864,27 @@ std::string DumpBytecode(asIScriptFunction *function)
 					{
 						asIObjectType *type = reinterpret_cast<asIObjectType *>(arg0);
 						asIScriptFunction *func = engine->GetFunctionById(asBC_WORDARG0(inst));
-						disas = fmtString("%s 0x%x, %d (type:%s, %s)", mnem,
-								  arg0, reinterpret_cast<int &>(arg1), type->GetName(), func ? func->GetDeclaration() : "{no func}");
+						disas = fmtString("%-8s 0x%x, %d (type:%s, %s)", mnem,
+										  arg0,
+										  reinterpret_cast<int &>(arg1),
+										  type->GetName(),
+										  func ? func->GetDeclaration() : "{no func}");
+					}
+					break;
+				case asBC_SetG4:
+					{
+						asCGlobalProperty *prop = function->GetPropertyByGlobalVarPtr(reinterpret_cast<void *>(arg0));
+						disas = fmtString("%-8s 0x%x, %d (%d:%s)", mnem,
+										  arg0,
+										  reinterpret_cast<int &>(arg1),
+										  prop->id,
+										  prop->name.AddressOf());
 					}
 					break;
 				default:
-					disas = fmtString("%s %u, %d", mnem,
-									  arg0, reinterpret_cast<int &>(arg1));
+					disas = fmtString("%-8s %u, %d", mnem,
+									  arg0,
+									  reinterpret_cast<int &>(arg1));
 					break;
 				}
 			}
@@ -841,8 +895,8 @@ std::string DumpBytecode(asIScriptFunction *function)
 				uint32_t arg1 = asBC_DWORDARG(inst);
 				uint32_t arg2 = asBC_DWORDARG1(inst);
 
-				disas = fmtString("%s v%d, %u, %u", mnem,
-								  arg0, arg1, arg2);
+				disas = fmtString("%-8s v%d, %u, %u", mnem,
+								  reinterpret_cast<int16_t &>(arg0), arg1, arg2);
 			}
 			break;
 		case asBCTYPE_QW_DW_ARG: // qword imm, dword imm
@@ -851,7 +905,7 @@ std::string DumpBytecode(asIScriptFunction *function)
 				uint64_t arg0 = asBC_QWORDARG(inst);
 				uint32_t arg1 = asBC_DWORDARG(inst);
 
-				disas = fmtString("%s %llu, %d", mnem,
+				disas = fmtString("%-8s %llu, %d", mnem,
 								  reinterpret_cast<int64_t &>(arg0), reinterpret_cast<int &>(arg1));
 			}
 			break;
@@ -864,7 +918,7 @@ std::string DumpBytecode(asIScriptFunction *function)
 					disas = fmtString("%d:", arg0);
 					break;
 				case asBC_LINE:
-					disas = fmtString("%s", mnem);
+					disas = fmtString("%-8s", mnem);
 					break;
 				case asBC_Block:
 					// #todo-csasm: Add block indenting
@@ -882,24 +936,43 @@ std::string DumpBytecode(asIScriptFunction *function)
 				switch (op)
 				{
 				case asBC_SetV1:
-					disas = fmtString("%s v%d, 0x%x", mnem,
-									  arg0, static_cast<uint8_t>(arg1));
+					disas = fmtString("%-8s v%d, 0x%x", mnem,
+									  reinterpret_cast<int16_t &>(arg0),
+									  static_cast<uint8_t>(arg1));
 					break;
 				case asBC_SetV2:
-					disas = fmtString("%s v%d, 0x%x", mnem,
-									  arg0, static_cast<uint16_t>(arg1));
+					disas = fmtString("%-8s v%d, 0x%x", mnem,
+									  reinterpret_cast<int16_t &>(arg0),
+									  static_cast<uint16_t>(arg1));
 					break;
 				case asBC_SetV4:
-					disas = fmtString("%s v%d, 0x%x (i:%d, f:%g)", mnem,
-									  arg0, arg1, reinterpret_cast<int &>(arg1), reinterpret_cast<float &>(arg1));
+					disas = fmtString("%-8s v%d, 0x%x (i:%d, f:%g)", mnem,
+									  reinterpret_cast<int16_t &>(arg0),
+									  arg1,
+									  reinterpret_cast<int &>(arg1),
+									  reinterpret_cast<float &>(arg1));
 					break;
 				case asBC_CMPIf:
-					disas = fmtString("%s v%d, %f", mnem,
-									  arg0, reinterpret_cast<float &>(arg1));
+					disas = fmtString("%-8s v%d, %f", mnem,
+									  reinterpret_cast<int16_t &>(arg0),
+									  reinterpret_cast<float &>(arg1));
+					break;
+				case asBC_LdGRdR4: // global vars
+				case asBC_CpyGtoV4:
+				case asBC_CpyVtoV4:
+					{
+						asCGlobalProperty *prop = function->GetPropertyByGlobalVarPtr(reinterpret_cast<void *>(arg1));
+						disas = fmtString("%-8s v%d, 0x%x (%d:%s)", mnem,
+										  reinterpret_cast<int16_t &>(arg0),
+										  reinterpret_cast<int &>(arg1),
+										  prop->id,
+										  prop->name.AddressOf());
+					}
 					break;
 				default:
-					disas = fmtString("%s v%d, %d", mnem,
-									  arg0, reinterpret_cast<int &>(arg1));
+					disas = fmtString("%-8s v%d, %d", mnem,
+									  reinterpret_cast<int16_t &>(arg0),
+									  reinterpret_cast<int &>(arg1));
 					break;
 				}
 			}
@@ -911,8 +984,10 @@ std::string DumpBytecode(asIScriptFunction *function)
 				uint16_t arg0 = asBC_WORDARG0(inst);
 				uint16_t arg1 = asBC_WORDARG1(inst);
 				uint16_t arg2 = asBC_WORDARG2(inst);
-				disas = fmtString("%s v%d, v%d, v%d", mnem,
-								  arg0, arg1, arg2);
+				disas = fmtString("%-8s v%d, v%d, v%d", mnem,
+								  reinterpret_cast<int16_t &>(arg0),
+								  reinterpret_cast<int16_t &>(arg1),
+								  reinterpret_cast<int16_t &>(arg2));
 			}
 			break;
 		default:
@@ -938,7 +1013,16 @@ std::string DumpModule(asIScriptModule *module)
 		int typeId;
 		const char *nameSpace;
 		const char *enumName = module->GetEnumByIndex(i, &typeId, &nameSpace);
-		dump.append(fmtString("\t%s", enumName));
+
+		std::string prefix = "";
+		if (std::string(nameSpace) != "")
+		{
+			prefix = nameSpace;
+			prefix += "::";
+		}
+		dump.append(fmtString("\t%s%s",
+							  prefix.c_str(),
+							  enumName));
 
 		asIObjectType *type = module->GetEngine()->GetObjectTypeById(typeId);
 		if (type)
@@ -984,7 +1068,7 @@ std::string DumpModule(asIScriptModule *module)
 	for (unsigned int i = 0; i < module->GetGlobalVarCount(); ++i)
 	{
 		// #todo-csasm: Dump global variables
-		dump.append(fmtString("\t%s\n", module->GetGlobalVarDeclaration(i)));
+		dump.append(fmtString("\t%s\n", module->GetGlobalVarDeclaration(i, true)));
 	}
 
 	// Imported functions
@@ -993,8 +1077,8 @@ std::string DumpModule(asIScriptModule *module)
 	{
 		// #todo-csasm: Dump imported functions
 		dump.append(fmtString("\t%s %s\n",
-								 module->GetImportedFunctionDeclaration(i),
-								 module->GetImportedFunctionSourceModule(i)));
+							  module->GetImportedFunctionDeclaration(i),
+							  module->GetImportedFunctionSourceModule(i)));
 	}
 
 	// Functions
@@ -1004,8 +1088,8 @@ std::string DumpModule(asIScriptModule *module)
 		asIScriptFunction *func = module->GetFunctionByIndex(i);
 		// #todo-csasm: Dump functions
 		dump.append(fmtString("\t%s\n",
-								  func->GetDeclaration(true, true, true)));
-		dump.append(DumpBytecode(func));
+							  func->GetDeclaration(true, true, true)));
+		dump.append(dumpBytecode(func));
 	}
 
 	return dump;
